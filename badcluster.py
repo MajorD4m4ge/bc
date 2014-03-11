@@ -842,19 +842,18 @@ def ReadData(volume, clusterlist, size):
         return status, error, filedata
 
 
-def WriteDatatoFile(file, filedata):
+def WriteDatatoFile(file, output, filedata):
     status = True
     error = ''
-    global FileData
     global MD5HashValue
     try:
         if (debug >= 1):
             print('Entering WriteDatatoFile:')
-        if not (FileData == ''):
-            with open(file, "wb") as f:
-                f.write(FileData)
+        if not (filedata == ''):
+            with open(output + '\\' + file, "wb") as f:
+                f.write(filedata)
             md5 = hashlib.md5()
-            md5.update(FileData)
+            md5.update(filedata)
             MD5HashValue = md5.hexdigest()
         else:
             error = 'File Data is Emtpy.'
@@ -946,9 +945,10 @@ def main(argv):
     global MD5HashValue
     parser = argparse.ArgumentParser(description="A FAT32 file system writer that hides data in bad clusters.",
                                      add_help=True)
-    parser.add_argument('-f', '--file', help='The filename to write to the FAT32 volume or the filename to output.',
-                        required=True)
+    parser.add_argument('-f', '--file', help='The filename to write to the FAT32 volume.',
+                        required=False)
     parser.add_argument('-v', '--volume', help='The volume to write the file to.', required=True)
+    parser.add_argument('-o', '--output', help='The output folder to write the file to.', required=False)
     parser.add_argument('-d', '--debug', help='The level of debugging.', required=False)
     rwgroup = parser.add_mutually_exclusive_group()
     rwgroup.add_argument('-w', '--write', help='Write a file to the FAT32 volume.', action='store_true',
@@ -966,6 +966,8 @@ def main(argv):
         volume = args.volume
     if (args.read):
         read = args.read
+    if (args.output):
+        output = args.output
     if (args.debug):
         debug = args.debug
         debug = int(debug)
@@ -1045,6 +1047,7 @@ def main(argv):
         else:
             print('|  [-] Updating FSInfo.                                                     |')
             Failed(error)
+        Completed(file)
     else:
         status, error, data = ReadCompressedClusters(volume)
         if (status):
@@ -1064,15 +1067,15 @@ def main(argv):
         else:
             print('|  [-] Reading Data.                                                        |')
             Failed(error)
-        status, error = WriteDatatoFile(file, filedata)
+        status, error = WriteDatatoFile(output, filename, filedata)
         if (status):
             print('|  [+] Writing Data.                                                        |')
         else:
             print('|  [-] Writing Data.                                                        |')
             Failed(error)
-    #except IOError:
+        Completed(filename)
+        #except IOError:
     #    sys.exit('Error: File ' + str(file) + ' does not exist.')
-    Completed(file)
 
 
 main(sys.argv[1:])

@@ -387,7 +387,7 @@ def GetOffsetFromCluster(FATOffset, cluster):  #FATOffset is ReservedSectorCount
     return (temp)
 
 
-def GetChunks(file):
+def GetChunks(file, compress, compresseddata):
     status = True
     error = ''
     global TotalChunks
@@ -395,20 +395,34 @@ def GetChunks(file):
     try:
         if (debug >= 1):
             print('Entering GetChunks:')
-        totalchunks = (int)(GetFileSize(file) / ClusterSize)
-        remainderbytes = GetFileSize(file) % ClusterSize
-        if (remainderbytes == 0):  #Checks if there is a remainder, if so add an extra chunk to total
-            if (totalchunks == 0):  #Fits in one cluster
-                totalchunks = 1
-            TotalChunks = totalchunks
+        if compress:
+            totalchunks = (int)((len(compresseddata)) / ClusterSize)
+            remainderbytes = len(file) % ClusterSize
+            if (debug >= 2):
+                print('\tLength of Data: ' + str(len(file)))
+                print('\tTotal Chunks: ' + str(totalchunks))
+                print('\tRemainding bytes: ' + str(remainderbytes))
+            if (remainderbytes == 0):  #Checks if there is a remainder, if so add an extra chunk to total
+                if (totalchunks == 0):  #Fits in one cluster
+                    totalchunks = 1
+                TotalChunks = totalchunks
+            else:
+                TotalChunks = totalchunks + 1
         else:
-            TotalChunks = totalchunks + 1
-        if (debug >= 2):
-            print('\t' + str(totalchunks) + ' - ' + str(ClusterSize) + ' byte chunks.')
-            print('\tRemainder Bytes: ' + str(remainderbytes))
-            print('\tOriginal File Size: ' + str(GetFileSize(file)))
-            print('\tTotal Bytes to be Written: ' + str(totalchunks * ClusterSize + remainderbytes))
-            print('\tTotal Chunks: ' + str(TotalChunks))
+            totalchunks = (int)(GetFileSize(file) / ClusterSize)
+            remainderbytes = GetFileSize(file) % ClusterSize
+            if (remainderbytes == 0):  #Checks if there is a remainder, if so add an extra chunk to total
+                if (totalchunks == 0):  #Fits in one cluster
+                    totalchunks = 1
+                TotalChunks = totalchunks
+            else:
+                TotalChunks = totalchunks + 1
+            if (debug >= 2):
+                print('\t' + str(totalchunks) + ' - ' + str(ClusterSize) + ' byte chunks.')
+                print('\tRemainder Bytes: ' + str(remainderbytes))
+                print('\tOriginal File Size: ' + str(GetFileSize(file)))
+                print('\tTotal Bytes to be Written: ' + str(totalchunks * ClusterSize + remainderbytes))
+                print('\tTotal Chunks: ' + str(TotalChunks))
     except:
         error = ('Cannot Calculate Fragments.')
         status = False
@@ -419,6 +433,7 @@ def GetChunks(file):
 def ReadFat(volume, chunks):  #Passes in the volume and chunks that need to written
     status = True
     error = ''
+
     global ChunkList
     global FirstCluster
     global TotalFreeClusters
@@ -549,6 +564,29 @@ def WriteData(volume, file, clusterlist):
     finally:
         return status, error
 
+def PackFile(filename):
+    status = True
+    error = ''
+    compressed = ''
+    lzc = lzma.LZMACompressor()
+    try:
+        if (debug >= 1):
+            print('Entering PackFile:')
+        if (debug >= 2):
+            print('\tFilename passed in: ' + str(filename))
+        with open(filename, "rb") as r:
+            if (debug >= 1):
+                print('\tReading file: ' + str(ntpath.basename(filename)))
+            data = r.read()
+            if (debug >= 3):
+                print('\tRaw file data: ' + str(data))
+            compressed = lzc.compress(data)
+            compressed += lzc.flush()
+    except:
+        status = False
+        error = 'Cannot compress file.'
+    finally:
+        return status, error, compressed
 
 def PackClusterList(filename, size, clusterlist):
     status = True
@@ -610,10 +648,11 @@ def WriteCompressedClusters(volume, packedlist):
         return status, error
 
 
-def WriteCompressedData(volume, filename, clusterlist):
+def WriteCompressedData(volume, filename, clusterlist, compressed, compresseddata):
     status = True
     error = ''
     chunk = ''
+
     try:
         if (debug >= 1):
             print('Entering WriteCompressedData:')
@@ -625,18 +664,33 @@ def WriteCompressedData(volume, filename, clusterlist):
         with open(volume, "rb+") as f:
             if (debug >= 1):
                 print('Opening Volume: ' + str(volume))
-            with open(filename, "rb") as r:
-                if (debug >= 1):
-                    print('\tReading file: ' + str(ntpath.basename(filename)))
+            if not compressed:
+                with open(filename, "rb") as r:
+                    if (debug >= 1):
+                        print('\tReading file: ' + str(ntpath.basename(filename)))
+                    for cluster in clusterlist:  #New Offset is 2 (Cluster)
+                        seeker = (cluster * ClusterSize + (DataAreaStart * BytesPerSector) - 2 * ClusterSize)
+                        f.seek(seeker)  #Each ClusterNum - 2 (Offset) * Bytes per cluster + (DataAreaStart * 512)
+                        if (debug >= 2):
+                            print('\tSeeking to Cluster (Bytes) [Cluster]: ' + '[' + str(cluster) + ']' + str(seeker))
+                        chunk = r.read(ClusterSize)
+                        if (debug >= 2):
+                            print('\tData Chunk Written: ' + str(chunk))
+                        f.write(chunk)
+            else:
+                if (debug >= 3):
+                    print('\tReading data: ' + str(compresseddata))
+                x = 0
                 for cluster in clusterlist:  #New Offset is 2 (Cluster)
                     seeker = (cluster * ClusterSize + (DataAreaStart * BytesPerSector) - 2 * ClusterSize)
                     f.seek(seeker)  #Each ClusterNum - 2 (Offset) * Bytes per cluster + (DataAreaStart * 512)
                     if (debug >= 2):
                         print('\tSeeking to Cluster (Bytes) [Cluster]: ' + '[' + str(cluster) + ']' + str(seeker))
-                    chunk = r.read(ClusterSize)
+                    chunk = compresseddata[x:ClusterSize+x]
                     if (debug >= 2):
                         print('\tData Chunk Written: ' + str(chunk))
                     f.write(chunk)
+                    x += ClusterSize
             if (debug >= 1):
                 print('\tCompleted Writing Data.')
     except:
@@ -941,14 +995,17 @@ signal.signal(signal.SIGINT, signal_handler)
 def main(argv):
     status = True
     read = False
+    compress = False
+    compressed = ''
     global debug
     global MD5HashValue
     parser = argparse.ArgumentParser(description="A FAT32 file system writer that hides data in bad clusters.",
                                      add_help=True)
     parser.add_argument('-f', '--file', help='The filename to write to the FAT32 volume.',
-                        required=False)
+                        required=True)
     parser.add_argument('-v', '--volume', help='The volume to write the file to.', required=True)
     parser.add_argument('-o', '--output', help='The output folder to write the file to.', required=False)
+    parser.add_argument('-s', '--compress', help='Compress the file being written.', action='store_true', required=False)
     parser.add_argument('-d', '--debug', help='The level of debugging.', required=False)
     rwgroup = parser.add_mutually_exclusive_group()
     rwgroup.add_argument('-w', '--write', help='Write a file to the FAT32 volume.', action='store_true',
@@ -968,6 +1025,8 @@ def main(argv):
         read = args.read
     if (args.output):
         output = args.output
+    if (args.compress):
+        compress = args.compress
     if (args.debug):
         debug = args.debug
         debug = int(debug)
@@ -999,7 +1058,14 @@ def main(argv):
         Failed(error)
 
     if not read:
-        status, error = GetChunks(file)
+        if (compress):
+            status, error, compressed = PackFile(file)
+            if (status):
+                print('|  [+] Compressing File.                                                    |')
+            else:
+                print('|  [-] Compressing File.                                                    |')
+                Failed(error)
+        status, error = GetChunks(file, compress, compressed)
         if (status):
             print('|  [+] Calculating Clusters.                                                |')
         else:
@@ -1029,12 +1095,12 @@ def main(argv):
         else:
             print('|  [-] Writing Compressed Cluster List.                                     |')
             Failed(error)
-        status, error = WriteCompressedData(volume, file, ChunkList)
+        status, error = WriteCompressedData(volume, file, ChunkList, compress, compressed)
         if (status):
-            print('|  [+] Writing Compressed Data.                                             |')
+                print('|  [+] Writing Data.                                                    |')
         else:
-            print('|  [-] Writing Compressed Data.                                             |')
-            Failed(error)
+                print('|  [-] Writing Data.                                                    |')
+                Failed(error)
         status, error = GetNextFreeCluster(volume)
         if (status):
             print('|  [+] Getting Next Free Cluster.                                           |')
